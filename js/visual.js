@@ -137,3 +137,22 @@ export function markers(points, sel) {
     .map((p) => `<button class="mk ${p.no === sel ? 'on' : ''} ${p.kind === 'card' ? 'card' : ''}" data-no="${p.no}" style="left:${p.x * 100}%;top:${p.y * 100}%;--c:${esc(p.hex || '#fff')}">${p.kind === 'card' ? '기준' : p.no}</button>`)
     .join('');
 }
+
+/* ---------- 광택 그림: 바닥에 비친 천장 조명 ---------- */
+const GLOSS_LOOK = {
+  유광: { blur: 0.4, op: 0.95, rx: 16, ry: 5 },
+  반광: { blur: 4, op: 0.6, rx: 20, ry: 7 },
+  하광: { blur: 9, op: 0.32, rx: 26, ry: 10 },
+  무광: { blur: 0, op: 0, rx: 0, ry: 0 },
+};
+export function glossSvg(level, base = '#a8784a') {
+  const g = GLOSS_LOOK[level] || GLOSS_LOOK.무광;
+  const id = 'gb' + Object.keys(GLOSS_LOOK).indexOf(level);
+  const seams = [20, 40].map((y) => `<path d="M0 ${y} H120" stroke="${shade(base, 0.6)}" stroke-width="1"/>`).join('');
+  const grain = [8, 15, 27, 34, 47, 53].map((y, i) => `<path d="M${i * 9} ${y} q30 ${i % 2 ? 1 : -1} 70 0" stroke="${shade(base, 0.8)}" stroke-width=".8" fill="none"/>`).join('');
+  return `<svg class="gloss" viewBox="0 0 120 60" role="img" aria-label="${esc(level)} 바닥 반사 그림">
+    <defs><filter id="${id}" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="${g.blur}"/></filter></defs>
+    <rect width="120" height="60" fill="${esc(base)}"/>${grain}${seams}
+    ${g.op ? `<ellipse cx="60" cy="30" rx="${g.rx}" ry="${g.ry}" fill="#fff" opacity="${g.op}" filter="url(#${id})"/>` : ''}
+  </svg>`;
+}

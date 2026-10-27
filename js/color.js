@@ -155,3 +155,99 @@ export function labToHex([L, a, b]) {
   const bb = 0.0557 * x - 0.204 * y + 1.057 * z;
   return rgbToHex(unlin([r, gg, bb]));
 }
+
+/* ---------- 광택 짐작 ---------- */
+// 사진 속 조명 반사가 얼마나 또렷한지로 광택을 짐작 (참고용 — 각도·조명에 따라 틀릴 수 있음)
+// cardPt: 기준 카드 위치(0~1) — 카드가 반사로 잡히지 않게 그 주변 비슷한 색은 뺌
+// roi: 찍은 판들을 감싸는 범위 {x0,y0,x1,y1}(0~1) — 마루 밖 물건(가방·벽)을 빼려고. 없으면 가장자리 10%를 뺌
+export function estimateGloss(canvas, cardPt, roi) {
+  const W = 200, H = Math.max(1, Math.round((canvas.height / canvas.width) * W));
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(canvas, 0, 0, W, H);
+  const d = ctx.getImageData(0, 0, W, H).data;
+  const N = W * H;
+  const L = new Float32Array(N);
+  for (let i = 0; i < N; i++) L[i] = 0.2126 * d[i * 4] + 0.7152 * d[i * 4 + 1] + 0.0722 * d[i * 4 + 2];
+  // 볼 범위 밖은 뺌
+  const r = roi || { x0: 0.1, y0: 0.1, x1: 0.9, y1: 0.9 };
+  const mask = new Uint8Array(N);
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++)
+      if (x < r.x0 * W || x > r.x1 * W || y < r.y0 * H || y > r.y1 * H) mask[y * W + x] = 1;
+  // 카드 영역: 카드 점에서 비슷한 색으로 이어진 곳 + 테두리 2칸
+  if (cardPt) {
+    const sx = Math.min(W - 1, Math.round(cardPt.x * W)), sy = Math.min(H - 1, Math.round(cardPt.y * H));
+    const s = (sy * W + sx) * 4, seed = [d[s], d[s + 1], d[s + 2]];
+    const card = new Uint8Array(N);
+    const q = [sy * W + sx];
+    card[q[0]] = 1;
+    while (q.length) {
+      const p = q.pop(), x = p % W, y = (p / W) | 0;
+      [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dx, dy]) => {
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= W || ny >= H) return;
+        const n = ny * W + nx;
+        if (card[n]) return;
+        const k = n * 4;
+        if (Math.abs(d[k] - seed[0]) + Math.abs(d[k + 1] - seed[1]) + Math.abs(d[k + 2] - seed[2]) < 70) { card[n] = 1; q.push(n); }
+      });
+    }
+    for (let i = 0; i < N; i++) if (card[i]) {
+      const x = i % W, y = (i / W) | 0;
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+        const xx = x + dx, yy = y + dy;
+        if (xx >= 0 && yy >= 0 && xx < W && yy < H) mask[yy * W + xx] = 1;
+      }
+    }
+  }
+  // 결 무늬를 흐리게 (9칸 평균)
+  const B = new Float32Array(N);
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++) {
+      let sum = 0, n = 0;
+      for (let dy = -4; dy <= 4; dy += 2) for (let dx = -4; dx <= 4; dx += 2) {
+        const xx = x + dx, yy = y + dy;
+        if (xx < 0 || yy < 0 || xx >= W || yy >= H || mask[yy * W + xx]) continue;
+        sum += L[yy * W + xx]; n++;
+      }
+      B[y * W + x] = n ? sum / n : L[y * W + x];
+    }
+  // 사진 전체가 한쪽으로 밝아지는 것(노출 차이)은 반사가 아니므로 평면으로 맞춰 뺌: bg = a + b·x + c·y
+  let n = 0, sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0, sz = 0, sxz = 0, syz = 0;
+  for (let i = 0; i < N; i++) {
+    if (mask[i]) continue;
+    const x = (i % W) / W, y = ((i / W) | 0) / H, z = B[i];
+    n++; sx += x; sy += y; sxx += x * x; syy += y * y; sxy += x * y; sz += z; sxz += x * z; syz += y * z;
+  }
+  if (n < N * 0.15) return null;
+  // 3x3 정규방정식 (크라메르)
+  const A = [[n, sx, sy], [sx, sxx, sxy], [sy, sxy, syy]], v = [sz, sxz, syz];
+  const det3 = (m) => m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+  const D = det3(A);
+  const col = (k) => A.map((row, i) => row.map((x, j) => (j === k ? v[i] : x)));
+  const [a, b, cc] = D ? [det3(col(0)) / D, det3(col(1)) / D, det3(col(2)) / D] : [sz / n, 0, 0];
+  let faint = 0, glow = 0, hot = 0, edge = 0;
+  for (let y = 1; y < H - 1; y++)
+    for (let x = 1; x < W - 1; x++) {
+      const i = y * W + x;
+      if (mask[i]) continue;
+      const bg = Math.max(20, a + (b * x) / W + (cc * y) / H);
+      if (B[i] > Math.max(bg * 1.12, bg + 10)) faint++;
+      if (B[i] > Math.max(bg * 1.35, bg + 25)) glow++;
+      if (L[i] > Math.max(232, bg * 1.9)) {
+        hot++;
+        // 반사 가장자리가 또렷한지: 주변과 밝기 차이
+        const g = Math.max(Math.abs(L[i] - L[i - 1]), Math.abs(L[i] - L[i + 1]), Math.abs(L[i] - L[i - W]), Math.abs(L[i] - L[i + W]));
+        if (g > 40) edge++;
+      }
+    }
+  const fFaint = faint / n, fGlow = glow / n, fHot = hot / n, sharp = hot ? edge / hot : 0;
+  let level, why;
+  if (fHot > 0.003 && (sharp > 0.12 || fHot > 0.02)) { level = '유광'; why = '조명 반사가 또렷하게 찍혔습니다'; }
+  else if (fGlow > 0.04) { level = '반광'; why = '반사가 넓게 번져 보입니다'; }
+  else if (fGlow > 0.012 || fFaint > 0.04) { level = '하광'; why = '반사가 희미하게만 보입니다'; }
+  else { level = '무광'; why = '반사가 거의 없습니다'; }
+  return { level, why, fFaint, fGlow, fHot, sharp };
+}

@@ -1,9 +1,9 @@
 import { store, subscribe, initStore, login, logout, save, remove, saveSettings, restoreAll, newId } from './store.js';
 import { esc, today, md, matches, download } from './util.js';
-import { CATALOG, KIND_LABEL, SURFACES, GLOSS, FEELINGS, STAGES, GRAIN, GRAIN_TIPS, TONER_TIPS, RECOVERY } from './seed.js';
-import { sampleAt, cardGain, applyGain, deltaE, deLabel, direction, mixPreview, lighten20, tonerLayer, afterClear, hexToRgb, rgbToHex, lin, unlin, rgbToLab } from './color.js';
+import { CATALOG, KIND_LABEL, SURFACES, GLOSS, FEELINGS, STAGES, GRAIN, GRAIN_TIPS, TONER_TIPS, GLOSS_TIPS, RECOVERY } from './seed.js';
+import { sampleAt, cardGain, applyGain, deltaE, deLabel, direction, mixPreview, lighten20, tonerLayer, afterClear, hexToRgb, rgbToHex, lin, unlin, rgbToLab, estimateGloss } from './color.js';
 import { solveJob, solveBoard, solveFix, correctTarget, yieldUI, finalFromTest } from './solver.js';
-import { swatch, swatchFlow, drops, fmtDrops, tonerSteps, layerDiagram, grainSvg, markers } from './visual.js';
+import { swatch, swatchFlow, drops, fmtDrops, tonerSteps, layerDiagram, grainSvg, glossSvg, markers } from './visual.js';
 import { uploadPhoto, deletePhotos, photoUrls, photoBase64, photoCanvas, usedBytes } from './photos.js';
 import { askAI, aiReady } from './ai.js';
 import { ic } from './icons.js';
@@ -218,6 +218,19 @@ async function canvasFor(photo) {
   return canvasCache.get(photo.path);
 }
 
+// 사진 찍기 단계: ① 기준 카드 → ② 주변 판 → ③ 계산. 지금 할 단계를 크게 보여줌
+function tapSteps(j) {
+  const n = boardPoints(j).length;
+  const card = !!j.cardHex;
+  const now = ui.tapMode === 'card' ? 1 : n ? 3 : 2;
+  const step = (k, label, done) => `<span class="tstep ${done ? 'done' : ''} ${now === k ? 'now' : ''}">${done ? '✓' : k}<b>${label}</b></span>`;
+  const msg = now === 1 ? '사진 속 카드 가운데를 한 번 누르세요'
+    : n ? `판 ${n}개를 찍었습니다. 더 누르거나 아래에서 <b>계산으로 레시피 짜기</b>를 누르세요`
+    : `${card ? '기준 카드 완료. ' : ''}이제 <b>주변 판을 하나씩 톡톡</b> 누르세요 (1, 2, 3 번호가 붙어요)`;
+  return `<div class="tsteps">${step(1, '기준 카드', card)}${step(2, `주변 판${n ? ` ${n}개` : ''}`, n > 0)}${step(3, '계산', !!j.recipe)}</div>
+    <div class="tnext ${now === 2 ? 'hot' : ''}">${msg}</div>`;
+}
+
 function renderJob(id) {
   const j = findJob(id);
   if (!j) return (view.innerHTML = '<div class="empty">기록을 찾을 수 없습니다</div>');
@@ -242,7 +255,8 @@ function renderJob(id) {
           <button data-m="board" class="${ui.tapMode === 'board' ? 'on' : ''}">판 찍기</button>
           <button data-m="card" class="${ui.tapMode === 'card' ? 'on' : ''}">기준 카드 찍기</button>
         </div>
-        <p class="hint">${ui.tapMode === 'card' ? '사진 속 <b>흰색·회색 카드</b>를 한 번 누르세요. 조명 색을 보정합니다.' : '보수 부위 <b>주변 판</b>을 하나씩 누르세요. 조명이 하얗게 비친 곳은 피하세요.'}</p>
+        ${tapSteps(j)}
+        <p class="hint">${ui.tapMode === 'card' ? '회색 카드가 조명 색을 보정합니다.' : '결 무늬 말고 바탕색 부분을, 조명이 하얗게 비친 곳은 피해서 누르세요.'}</p>
         <div class="photo-tap" id="tap"><img id="tap-img" alt="현장 사진" />${markers(pts, j.targetNo)}</div>
         ${j.cardHex ? `<div class="row small muted" style="margin-top:8px">${swatch(j.cardHex, '기준 카드', '보정 켜짐', 'tiny')}</div>` : '<p class="hint warn">기준 카드를 안 찍으면 색 정확도가 떨어집니다.</p>'}
       ` : `<div class="shot-tips">
@@ -315,7 +329,7 @@ function renderJob(id) {
         const points = (cur.points || []).filter((p) => p.kind !== 'card').map((p) => ({ ...p, hex: applyGain(p.raw || p.hex, gain) }));
         await save('jobs', { ...cur, cardHex: s.hex, cardGain: gain, points: [...points, { no: 0, kind: 'card', x, y, hex: s.hex }] });
         ui.tapMode = 'board';
-        toast('기준 카드로 색을 보정했습니다');
+        toast('기준 카드 완료. 이제 주변 판을 눌러 주세요');
       } else {
         const bp = boardPoints(cur);
         const no = bp.length ? Math.max(...bp.map((p) => p.no)) + 1 : 1;
@@ -381,8 +395,8 @@ function recipeBlock(j) {
     const n = boardPoints(j).length;
     return `<div class="card">
       <p class="muted small">${n ? `${n}개 판의 색을 보고 판마다 바탕 물감 비율, 결 그리기, 토너, 마감을 정해 드립니다.` : '먼저 사진을 올리고 주변 판을 찍어 주세요.'}</p>
-      <div class="btns"><button class="btn accent" id="r-calc" ${n ? '' : 'disabled'}>${ic('drop')}계산으로 레시피 짜기</button>
-      <button class="btn line" id="r-manual" ${n ? '' : 'disabled'}>직접 입력</button>
+      <div class="btns"><button class="btn accent" id="r-calc">${ic('drop')}계산으로 레시피 짜기</button>
+      <button class="btn line" id="r-manual">직접 입력</button>
       ${aiOn() ? `<button class="btn line" id="r-ai" ${n && aiReady() ? '' : 'disabled'}>${ic('spark')}AI 레시피</button>` : ''}</div>
     </div>`;
   }
@@ -396,7 +410,7 @@ function recipeBlock(j) {
       ${R.analysis.putty ? `<p class="small" style="margin:10px 0 0"><b>밑작업</b> ${esc(R.analysis.putty)}</p>` : ''}
       ${(R.analysis.issues || []).length ? `<ul class="bul warn">${R.analysis.issues.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}` : ''}
       ${layerDiagram({ base: boardColors(j, R.boards[0] || {}).base, grain: null, toner: map[R.boards[0]?.toner?.main?.[0]?.id]?.hex, finishName: fin ? matName(fin) : '마감' })}
-      ${fin ? `<div class="finish"><div class="st-h"><b>④</b> 마감 ${swatch(fin.hex, matName(fin), fin.gloss || '', 'tiny')}</div><p class="small muted">${esc(R.finish.reason || '')}</p></div>` : ''}
+      ${fin ? `<div class="finish"><div class="st-h"><b>④</b> 마감 ${swatch(fin.hex, matName(fin), fin.gloss || '', 'tiny')}</div><p class="small muted">${esc(R.finish.reason || '')}</p>${glossTips()}</div>` : ''}
     </div>
     <div class="seg" id="r-view" style="margin-bottom:10px">
       <button data-v="cards" class="${ui.table ? '' : 'on'}">판별 카드</button>
@@ -409,7 +423,7 @@ function recipeBlock(j) {
       <div class="btns"><a class="btn sm line" target="_blank" rel="noopener" href="https://search.shopping.naver.com/search/all?query=${encodeURIComponent(m.search || m.name)}">네이버쇼핑</a>
       <a class="btn sm line" target="_blank" rel="noopener" href="https://www.coupang.com/np/search?q=${encodeURIComponent(m.search || m.name)}">쿠팡</a></div></div>`).join('')}</div>` : ''}
     <div class="btns" style="margin-bottom:12px">
-      <button class="btn line" id="r-calc" ${boardPoints(j).length ? '' : 'disabled'}>${ic('drop')}다시 계산</button>
+      <button class="btn line" id="r-calc">${ic('drop')}다시 계산</button>
       ${aiOn() ? `<button class="btn line" id="r-ai" ${aiReady() && boardPoints(j).length ? '' : 'disabled'}>${ic('spark')}AI로 다시 받기</button>` : ''}
       <button class="btn line" id="r-recover">진해졌을 때</button>
     </div>`;
@@ -474,12 +488,13 @@ function recipeTable(j) {
   R.boards.forEach((b) => (b.base?.paints || []).forEach((p) => (totals[p.id] = (totals[p.id] || 0) + p.drops)));
   const ids = Object.keys(totals).sort((a, b) => totals[b] - totals[a]);
   const cell = (b, id) => { const p = (b.base?.paints || []).find((x) => x.id === id); return p && p.drops ? `<td>${+(+p.drops).toFixed(1)}</td>` : '<td class="none">–</td>'; };
-  const tn = (t) => (map[t.id]?.code || '') + (t.passes > 1 ? `×${t.passes}` : '');
+  // 토너는 번호와 색상명을 같이 (좁은 칸이라 두 줄로)
+  const tn = (t) => { const m = map[t.id]; return m ? `<span class="tn"><b>${esc(m.code || '')}${t.passes > 1 ? ` ×${t.passes}` : ''}</b><small>${esc(m.name)}</small></span>` : ''; };
   return `<div class="card tbl-wrap"><table class="rtable">
     <thead><tr><th>물감</th>${R.boards.map((b) => `<th><span class="no">${b.no}</span><i style="background:${esc(boardColors(j, b).photo || b.target_hex || '#ccc')}"></i></th>`).join('')}</tr></thead>
     <tbody>${ids.map((id) => `<tr><th><i class="dot" style="background:${esc(map[id]?.hex || '#ccc')}"></i>${esc(map[id]?.name || id)}</th>${R.boards.map((b) => cell(b, id)).join('')}</tr>`).join('')}
-    <tr class="tsep"><th>토너</th>${R.boards.map((b) => `<td>${esc((b.toner?.main || []).map(tn).join(' → '))}</td>`).join('')}</tr>
-    <tr><th>보정</th>${R.boards.map((b) => `<td>${esc((b.toner?.adjust || []).map((t) => map[t.id]?.code || '').join(' → '))}</td>`).join('')}</tr></tbody>
+    <tr class="tsep"><th>토너</th>${R.boards.map((b) => `<td>${(b.toner?.main || []).map(tn).join('')}</td>`).join('')}</tr>
+    <tr><th>보정</th>${R.boards.map((b) => `<td>${(b.toner?.adjust || []).map(tn).join('')}</td>`).join('')}</tr></tbody>
   </table><p class="ref">숫자는 방울 수, 0.1~0.3은 이쑤시개 끝. 바탕은 타이탄버프 20% 더.</p></div>`;
 }
 
@@ -488,12 +503,28 @@ function bindRecipe(j) {
   $$('#r-view button').forEach((b) => (b.onclick = () => { ui.table = b.dataset.v === 'table'; $('#recipe').innerHTML = recipeBlock(findJob(id)); bindRecipe(findJob(id)); }));
   $$('[data-guide]').forEach((b) => (b.onclick = () => openGrainSheet(b.dataset.guide, findJob(id))));
   $$('[data-edit]').forEach((b) => (b.onclick = () => editBoard(id, +b.dataset.edit)));
+  // 판을 안 찍었으면 계산 대신 알려 주고 사진으로 데려감
+  const needBoards = () => {
+    const cur = findJob(id);
+    if (boardPoints(cur).length) return false;
+    const photo = $('#tap');
+    toast(photo ? '사진에서 주변 판을 눌러 주세요' : '먼저 사진을 올려 주세요');
+    const el = photo || $('#up-main')?.closest('.btn');
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.remove('nudge');
+      void el.offsetWidth;
+      el.classList.add('nudge');
+    }
+    return true;
+  };
   const calc = $('#r-calc');
-  if (calc) calc.onclick = () => calcSheet(id);
+  if (calc) calc.onclick = () => { if (!needBoards()) calcSheet(id); };
   const rec = $('#r-recover');
   if (rec) rec.onclick = recoverySheet;
   const man = $('#r-manual');
   if (man) man.onclick = async () => {
+    if (needBoards()) return;
     const cur = findJob(id);
     const boards = boardPoints(cur).map((p) => ({ no: p.no, name: '', target_hex: p.hex, base: { paints: [], note: '' }, grain: [], toner: { main: [], adjust: [] } }));
     await save('jobs', { ...cur, recipe: { source: 'manual', boards, finish: { id: 'm-0420', reason: '' }, tips: [], missing: [], at: new Date().toISOString() } });
@@ -525,10 +556,14 @@ function bindRecipe(j) {
   };
 }
 
+// 광택 맞추기 요령 (접었다 펴기)
+const glossTips = (open = false) => `<details class="gtips" ${open ? 'open' : ''}><summary>광택 맞추기 요령</summary><ul class="bul">${GLOSS_TIPS.map((t) => `<li>${esc(t)}</li>`).join('')}</ul></details>`;
+
 /* ---------- 계산 레시피 (AI 없이) ---------- */
 const L = (hex) => rgbToLab(hexToRgb(hex))[0];
 const shadeHex = (hex, k) => rgbToHex(unlin(lin(hexToRgb(hex)).map((v) => v * k)));
 const CLEAR_BY_GLOSS = { 유광: 'm-0420', 반광: 'm-0422', 하광: 'm-0421', 무광: 'm-0485' };
+const GLOSS_SEEN = { 유광: '조명이 거울처럼 또렷', 반광: '조명이 뿌옇게 번짐', 하광: '살짝 밝아지기만', 무광: '거의 안 비침' };
 
 // 결 무늬별 도구: 결펜 무늬는 바탕보다 1~2톤 진한 색에 가까운 결펜, 이음매는 가장 진한 결펜, 나머지는 세필붓
 function grainTool(G, baseHex) {
@@ -583,7 +618,7 @@ async function calcRecipe(jobId, opt, k, onStep) {
     const grain = (opt.grain || []).map((n) => GRAIN.find((g) => g.name === n)).filter(Boolean).map((G) => ({ pattern: G.k, tool_id: grainTool(G, baseHex), how: G.steps[0] }));
     return { no: p.no, name: old?.name || '', target_hex: p.hex, base: { paints: r.paints, note: '' }, grain, toner: { main: r.toner ? [r.toner] : [], adjust: r.adjust ? [r.adjust] : [] } };
   });
-  const used = [...new Set(res.filter((r) => r.toner).map((r) => map[r.toner.id].code))];
+  const used = [...new Set(res.filter((r) => r.toner).map((r) => matName(map[r.toner.id])))];
   const avg = res.reduce((a, r) => a + r.de, 0) / (res.length || 1);
   const tips = [
     `먼저 보수 기준 판(${cur.targetNo || pts[0]?.no}번)으로 시험칠하고, 시험칠·보정에서 사진을 찍으세요. 그 차이로 나머지 판도 한 번에 다시 계산할 수 있습니다.`,
@@ -605,12 +640,40 @@ function calcSheet(jobId) {
   const sh = openSheet(`${sheetHead('계산으로 레시피 짜기')}
     <p class="hint">가진 물감·토너만으로, ${wood ? '토너·마감까지 올린' : '칠한'} 예상 색이 사진 속 판과 가장 가까운 조합을 찾습니다. 비용 없이 휴대폰 안에서 계산합니다.</p>
     ${wood ? `<div class="field"><span>주변 결 무늬 (여러 개 고르기)</span>${chipRow('cg', GRAIN.map((g) => g.name), opt.grain, true)}</div>
-    <div class="field"><span>주변 광택</span>${chipRow('cl', GLOSS, opt.gloss)}</div>` : ''}
+    <div class="field"><span>주변 광택 <button type="button" class="linkbtn" id="c-gh">어떻게 고르나요?</button></span>${chipRow('cl', GLOSS, opt.gloss)}
+      <p class="hint" id="c-guess"></p>
+      <div id="c-gguide" class="gguide" hidden>
+        <p class="small">마루에 <b>낮게 쪼그려 앉아</b> 천장 조명이 바닥에 어떻게 비치는지 보고, 가장 비슷한 그림을 누르세요.</p>
+        <div class="ggrid">${GLOSS.map((g) => { const m = matMap()[CLEAR_BY_GLOSS[g]]; return `<button type="button" class="gpick" data-gloss="${g}">${glossSvg(g, pointHex(j, j.targetNo) || '#a8784a')}
+          <b>${g}</b><small>${GLOSS_SEEN[g]}</small><small class="muted">${esc(matName(m))}${esc(m.gloss.replace(/^\S+\s/, ''))}${owned(m) ? '' : ' · <span class="pill red">없음</span>'}</small></button>`; }).join('')}</div>
+        ${glossTips(true)}
+      </div></div>` : ''}
     ${j.calib ? `<label class="check"><input type="checkbox" id="c-k" checked /> 지난 시험칠로 잰 차이 반영</label>` : ''}
     <p class="ref">예상 색은 물감 대략 색으로 계산한 참고용입니다. 시험칠 한 번으로 차이를 재서 다시 맞춥니다.</p>
     <div class="foot"><button class="btn accent block" id="c-go">${ic('drop')}계산하기</button></div>`);
   bindChips(sh, 'cg', (v) => (opt.grain = v));
   bindChips(sh, 'cl', (v) => (opt.gloss = v));
+  const pickGloss = (g) => $(`[data-chips="cl"] button[data-v="${g}"]`, sh)?.click();
+  if (wood) {
+    $('#c-gh', sh).onclick = () => ($('#c-gguide', sh).hidden = !$('#c-gguide', sh).hidden);
+    $$('[data-gloss]', sh).forEach((b) => (b.onclick = () => { pickGloss(b.dataset.gloss); $('#c-gguide', sh).hidden = true; }));
+    // 사진 반사로 짐작 (처음 계산할 때만 미리 골라 둠 — 눈으로 보고 바꾸면 그게 우선)
+    const mp = mainPhoto(j);
+    if (mp) canvasFor(mp).then((cv) => {
+      const card = (j.points || []).find((p) => p.kind === 'card');
+      // 찍은 판들을 감싸는 범위만 봄 (마루 밖 물건 빼기)
+      const bp = boardPoints(j).filter((p) => !p.photoId || p.photoId === mp.id);
+      const roi = bp.length >= 2 ? {
+        x0: Math.max(0, Math.min(...bp.map((p) => p.x)) - 0.1), x1: Math.min(1, Math.max(...bp.map((p) => p.x)) + 0.1),
+        y0: Math.max(0, Math.min(...bp.map((p) => p.y)) - 0.1), y1: Math.min(1, Math.max(...bp.map((p) => p.y)) + 0.1),
+      } : null;
+      const g = estimateGloss(cv, card && { x: card.x, y: card.y }, roi);
+      const el = $('#c-guess', sh);
+      if (!g || !el) return;
+      el.innerHTML = `사진상 짐작: <b>${g.level}</b> — ${g.why}. 각도에 따라 틀릴 수 있으니 눈으로 확인하세요.`;
+      if (!j.recipe?.calcOpt) pickGloss(g.level);
+    }).catch(() => {});
+  }
   $('#c-go', sh).onclick = async (e) => {
     const btn = e.currentTarget;
     const cur = findJob(jobId);
@@ -902,7 +965,7 @@ function renderMaterials() {
   const ownedN = mats.filter(owned).length;
   view.innerHTML = `
     <div class="hd"><div class="grow"><p class="eyebrow">가진 것만 체크</p><h1>내 재료</h1></div><span class="sync">${ownedN}/${mats.length}</span></div>
-    <p class="hint">체크한 재료만 AI가 레시피에 씁니다. 없는 재료가 필요하면 '있으면 좋은 재료'로 알려 드립니다.</p>
+    <p class="hint">체크한 재료만 레시피 계산에 씁니다. 없는 재료가 필요하면 '있으면 좋은 재료'로 알려 드립니다.</p>
     ${groups.map((k) => {
       const list = mats.filter((m) => m.kind === k);
       if (!list.length) return '';

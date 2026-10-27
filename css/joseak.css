@@ -153,3 +153,29 @@ body.printing #view { padding-bottom: 24px; }
   #view { padding: 0; }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
+
+/* 사진 찍기 단계 표시 */
+.tsteps { display: flex; gap: 6px; margin: 10px 0 6px; }
+.tsteps .tstep { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px; padding: 7px 4px; border-radius: 10px; background: var(--gray-soft); color: var(--muted); font-size: 13px; font-weight: 700; }
+.tsteps .tstep b { font-weight: 600; }
+.tsteps .tstep.done { background: var(--green-soft); color: var(--green); }
+.tsteps .tstep.now { background: var(--accent); color: #fff; }
+.tnext { font-size: 14px; padding: 10px 12px; border-radius: 10px; background: var(--gray-soft); }
+.tnext.hot { background: var(--accent-soft); color: var(--text); border: 1.5px solid var(--accent); }
+.nudge { animation: nudge 1.2s ease 2; }
+@keyframes nudge { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 40% { box-shadow: 0 0 0 4px var(--accent); } }
+
+/* 광택 고르기 */
+.linkbtn { background: none; border: 0; padding: 0 0 0 6px; color: var(--accent); font: inherit; font-size: 13px; text-decoration: underline; cursor: pointer; }
+.gguide { margin-top: 8px; padding: 10px; border-radius: 12px; background: var(--gray-soft); }
+.ggrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0; }
+.gpick { display: flex; flex-direction: column; gap: 2px; padding: 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--text); text-align: left; font: inherit; cursor: pointer; }
+.gpick svg.gloss { width: 100%; height: auto; border-radius: 6px; display: block; margin-bottom: 4px; }
+.gpick b { font-size: 14px; }
+.gpick small { font-size: 12px; }
+.gtips { margin-top: 8px; font-size: 13px; }
+.gtips summary { cursor: pointer; color: var(--accent); font-weight: 600; }
+.gtips ul { margin: 6px 0 0; }
+.rtable .tn { display: block; line-height: 1.25; white-space: nowrap; }
+.rtable .tn + .tn { margin-top: 4px; }
+.rtable .tn small { display: block; font-size: 11px; color: var(--muted); font-weight: 400; }

@@ -1,6 +1,6 @@
 // 앱 화면 파일을 저장해 두어 현장에서 신호가 약해도 열리게 합니다.
 // 파일을 고친 뒤에는 CACHE 숫자를 올려야 휴대폰에 새 버전이 들어갑니다.
-const CACHE = 'joseak-v2';
+const CACHE = 'joseak-v5';
 const SHELL = [
   './', './index.html', './css/style.css', './css/joseak.css', './manifest.webmanifest', './config.js',
   './js/app.js', './js/store.js', './js/seed.js', './js/util.js', './js/color.js', './js/visual.js',
