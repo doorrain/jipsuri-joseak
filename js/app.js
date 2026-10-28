@@ -7,6 +7,7 @@ import { swatch, swatchFlow, drops, fmtDrops, tonerSteps, layerDiagram, grainSvg
 import { uploadPhoto, deletePhotos, photoUrls, photoBase64, photoCanvas, usedBytes } from './photos.js';
 import { askAI, aiReady } from './ai.js';
 import { ic } from './icons.js';
+import { renderMix } from './mix.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
@@ -68,7 +69,7 @@ function go(hash) {
   if (location.hash === hash) render();
   else location.hash = hash;
 }
-window.addEventListener('hashchange', () => { closeSheet(); render(); window.scrollTo(0, 0); });
+window.addEventListener('hashchange', () => { closeSheet(); if (location.hash.startsWith('#mix/')) mixScroll = true; render(); window.scrollTo(0, 0); });
 
 /* ================= 재료 ================= */
 const S = () => store.state.settings;
@@ -108,7 +109,7 @@ function route() {
 let lastKey = '';
 function doRender(force) {
   const { r, a, b } = route();
-  const tab = { jobs: 'jobs', job: 'jobs', fix: 'jobs', print: 'jobs', materials: 'materials', grain: 'grain', settings: 'settings' }[r] || 'jobs';
+  const tab = { jobs: 'jobs', job: 'jobs', mix: 'jobs', fix: 'jobs', print: 'jobs', materials: 'materials', grain: 'grain', settings: 'settings' }[r] || 'jobs';
   $$('#tabbar button').forEach((x) => x.classList.toggle('on', x.dataset.tab === tab));
   document.body.classList.toggle('printing', r === 'print');
   if (!store.ready) {
@@ -119,9 +120,9 @@ function doRender(force) {
   $('#tabbar').hidden = r === 'print';
   $('#fab').hidden = r !== 'jobs';
   const key = location.hash;
-  if (!force && key === lastKey && ['job', 'fix'].includes(r) && document.activeElement && view.contains(document.activeElement) && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
+  if (!force && key === lastKey && ['job', 'fix', 'mix'].includes(r) && document.activeElement && view.contains(document.activeElement) && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
   lastKey = key;
-  ({ jobs: renderJobs, job: () => renderJob(a), fix: () => renderFix(a, +b), print: () => renderPrint(a), materials: renderMaterials, grain: renderGrain, settings: renderSettings }[r] || renderJobs)();
+  ({ jobs: renderJobs, job: () => renderJob(a), mix: () => renderMix(view, a, mixHelpers()), fix: () => renderFix(a, +b), print: () => renderPrint(a), materials: renderMaterials, grain: renderGrain, settings: renderSettings }[r] || renderJobs)();
 }
 subscribe(() => render());
 
@@ -190,7 +191,7 @@ function renderJobs() {
     ${installCard()}
     <label class="search">${ic('search')}<input id="q" placeholder="제품명·단지명·색 이름으로 찾기" value="${esc(ui.q)}" /></label>
     ${list.length ? `<div class="list">${list.map((j) => `
-      <button class="li" data-go="#job/${j.id}">
+      <button class="li" data-go="#${j.mix ? 'mix' : 'job'}/${j.id}">
         <div class="pal">${jobColors(j) || '<i></i>'}</div>
         <div class="grow"><div class="t1 ell">${esc(jobTitle(j))}${j.saved ? '<span class="pill green">레시피</span>' : ''}</div>
         <div class="t2">${esc([j.surface, j.sub, ...(j.tags || [])].filter(Boolean).join(' · '))} · ${md((j.updatedAt || '').slice(0, 10))}</div></div>
@@ -224,9 +225,16 @@ function howCard() {
 
 async function newJob() {
   const id = newId('j');
-  await save('jobs', { id, surface: '마루', sub: '원목마루', status: '진행', points: [], photos: [], fixes: [], tags: [] });
-  go('#job/' + id);
+  await save('jobs', { id, surface: '마루', sub: '원목마루', status: '진행', points: [], photos: [], fixes: [], tags: [], mix: { stage: 'base', log: [] } });
+  go('#mix/' + id);
 }
+// 새 조색 화면(mix.js)에 넘기는 도구
+const mixHelpers = () => ({
+  findJob, jobTitle, isWood, matMap, matName, owned, ownedList, solveCtx, aiOn, canvasFor, toast, openSheet, closeSheet, sheetHead, chipRow, bindChips, go,
+  rerender: (force) => (force ? doRender(true) : render()), CLEAR_BY_GLOSS, SURFACES,
+  get scrollNew() { return mixScroll; }, set scrollNew(v) { mixScroll = v; },
+});
+let mixScroll = true;
 
 /* ================= ② 조색 작업 ================= */
 const findJob = (id) => store.state.jobs.find((j) => j.id === id);
