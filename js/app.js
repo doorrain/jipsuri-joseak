@@ -161,6 +161,25 @@ function jobColors(j) {
   return pts.slice(0, 8).map((p) => `<i style="background:${esc(p.hex)}"></i>`).join('');
 }
 
+/* ---------- 앱으로 설치 ---------- */
+// 크롬이 '설치할 수 있다'고 판단하면 beforeinstallprompt를 줌 → 메뉴를 찾지 않아도 버튼 하나로 진짜 앱 설치
+// (메뉴의 '홈 화면에 추가'는 바로가기라 매번 크롬 새 탭으로 열림)
+let installEvt = null;
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; render(); });
+window.addEventListener('appinstalled', () => { installEvt = null; toast('앱으로 설치했습니다. 홈 화면의 복원조색 아이콘으로 여세요'); render(); });
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+function installCard() {
+  if (isStandalone() || !installEvt) return '';
+  return `<div class="card install"><div class="grow"><b>앱으로 설치하기</b><p class="small muted">홈 화면 아이콘으로 바로 열리고, 매번 새 탭이 뜨지 않습니다.</p></div><button class="btn accent sm" id="do-install">설치</button></div>`;
+}
+async function doInstall() {
+  if (!installEvt) return;
+  installEvt.prompt();
+  const r = await installEvt.userChoice;
+  if (r.outcome === 'accepted') installEvt = null;
+  render();
+}
+
 function renderJobs() {
   const list = store.state.jobs
     .filter((j) => matches(`${jobTitle(j)} ${(j.tags || []).join(' ')} ${j.surface} ${j.sub} ${j.note || ''}`, ui.q))
@@ -168,6 +187,7 @@ function renderJobs() {
   view.innerHTML = `
     <div class="hd"><div class="grow"><p class="eyebrow">하이집수리</p><h1>복원 조색</h1></div>${syncBadge()}
       <button class="icon-btn" data-go="#settings" aria-label="설정">${ic('gear')}</button></div>
+    ${installCard()}
     <label class="search">${ic('search')}<input id="q" placeholder="제품명·단지명·색 이름으로 찾기" value="${esc(ui.q)}" /></label>
     ${list.length ? `<div class="list">${list.map((j) => `
       <button class="li" data-go="#job/${j.id}">
@@ -177,6 +197,7 @@ function renderJobs() {
       </button>`).join('')}</div>`
       : `<div class="empty">${ui.q ? '찾는 기록이 없습니다' : '아직 조색 기록이 없습니다.<br>아래 <b>새 조색</b>을 눌러 사진부터 올려 보세요.'}</div>`}
     ${howCard()}`;
+  if ($('#do-install')) $('#do-install').onclick = doInstall;
   const q = $('#q');
   q.oninput = () => {
     ui.q = q.value;
@@ -1077,5 +1098,9 @@ document.addEventListener('click', (e) => {
 $$('#tabbar button').forEach((b) => (b.onclick = () => go('#' + b.dataset.tab)));
 $('#fab').onclick = newJob;
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js');
+// 다른 앱 저장소(장부·견적)에 잘못 올렸을 때 바로 알 수 있게
+if (location.hostname.endsWith('github.io') && !location.pathname.startsWith('/jipsuri-joseak/')) {
+  document.body.insertAdjacentHTML('afterbegin', '<div style="background:#c8473d;color:#fff;padding:14px 16px;font-size:15px;line-height:1.5"><b>복원조색 앱 파일이 다른 저장소에 올라가 있습니다.</b><br>이 주소(' + location.pathname + ')는 복원조색 자리가 아닙니다. GitHub에서 원래 앱 파일로 되돌려 주세요.</div>');
+}
 initStore();
 render();

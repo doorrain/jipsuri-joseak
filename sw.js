@@ -1,6 +1,6 @@
 // 앱 화면 파일을 저장해 두어 현장에서 신호가 약해도 열리게 합니다.
 // 파일을 고친 뒤에는 CACHE 숫자를 올려야 휴대폰에 새 버전이 들어갑니다.
-const CACHE = 'joseak-v5';
+const CACHE = 'joseak-v7';
 const SHELL = [
   './', './index.html', './css/style.css', './css/joseak.css', './manifest.webmanifest', './config.js',
   './js/app.js', './js/store.js', './js/seed.js', './js/util.js', './js/color.js', './js/visual.js',
@@ -12,7 +12,7 @@ self.addEventListener('install', (e) => {
 });
 self.addEventListener('activate', (e) => {
   e.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim())
+    caches.keys().then((keys) => Promise.all(keys.filter((k) => k.startsWith('joseak-') && k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim())
   );
 });
 // 인터넷이 되면 항상 최신 파일, 안 되면 저장해 둔 파일

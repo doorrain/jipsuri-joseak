@@ -2,7 +2,7 @@
   "name": "하이집수리 복원조색",
   "short_name": "복원조색",
   "description": "사진으로 복원 조색 레시피 받기 · 시험칠 보정 · 결 그리기 안내",
-  "id": "/jipsuri-joseak/?app=joseak",
+  "id": "/jipsuri-joseak/",
   "start_url": "./#jobs",
   "scope": "./",
   "display": "standalone",

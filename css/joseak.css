@@ -179,3 +179,5 @@ body.printing #view { padding-bottom: 24px; }
 .rtable .tn { display: block; line-height: 1.25; white-space: nowrap; }
 .rtable .tn + .tn { margin-top: 4px; }
 .rtable .tn small { display: block; font-size: 11px; color: var(--muted); font-weight: 400; }
+.card.install { display: flex; align-items: center; gap: 10px; border: 1.5px solid var(--accent); background: var(--accent-soft); }
+.card.install b { font-size: 15px; }
