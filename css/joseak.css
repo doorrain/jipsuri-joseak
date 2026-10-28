@@ -223,3 +223,4 @@ body.printing #view { padding-bottom: 24px; }
 .mx-act .btns { display: flex; gap: 8px; }
 .mx-act .btn.grow { flex: 1; }
 .mx-act .ggrid { grid-template-columns: repeat(4, 1fr); }
+.mx-act .undo { display: block; margin: 10px auto 0; padding: 6px 12px; font-size: 13px; font-weight: 700; color: var(--muted); background: none; border: 0; }

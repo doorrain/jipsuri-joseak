@@ -15,9 +15,9 @@ import { fmtG, cupTotal, cupHex, proposeCup, scaleCup, baseFix, tonerPlanFrom, t
 let H; // app.js 도구들
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
-const CUPS = [10, 20, 30, 50];
+const CUPS = [1, 3, 5, 7, 10, 15];
 const STAGE_NAME = { base: '바탕색', toner: '토너', finish: '마감' };
-const mixUI = { cupG: 20, feel: {}, working: '' };
+const mixUI = { cupG: 5, feel: {}, working: '' };
 
 const nowIso = () => new Date().toISOString();
 const say = (o) => ({ id: newId('m'), who: 'app', at: nowIso(), ...o });
@@ -57,7 +57,7 @@ export function renderMix(view, id, helpers) {
       <button class="icon-btn" id="mx-more" aria-label="더보기">${ic('edit')}</button></div>
     <div class="mx-stages">${stages.map((s, i) => `<span class="${i < si ? 'done' : i === si ? 'now' : ''}">${i < si ? '✓ ' : `${i + 1} `}${STAGE_NAME[s]}</span>`).join('')}</div>
     <div class="mx-log">${(m.log || []).map((e) => bubble(j, e, n)).join('')}${mixUI.working ? `<div class="bb app"><span class="spin"></span>${esc(mixUI.working)}</div>` : ''}</div>
-    <div class="mx-act">${mixUI.working ? '' : action(j, n)}</div>`;
+    <div class="mx-act">${mixUI.working ? '' : action(j, n) + ((m.log || []).length ? '<button class="undo" data-undo>↶ 이전으로 되돌리기</button>' : '')}</div>`;
   bind(view, j, n);
   // 사진 불러오기
   const paths = $$('img[data-path]', view).map((im) => im.dataset.path);
@@ -192,6 +192,8 @@ async function working(label, fn) {
 
 function bind(view, j, n) {
   $('#mx-more', view).onclick = () => moreSheet(j);
+  const und = $('[data-undo]', view);
+  if (und) und.onclick = () => undo(j);
   const file = $('#mx-file', view);
   if (file) file.onchange = (e) => e.target.files[0] && addPhoto(j, e.target.files[0]);
   const retake = $('[data-retake]', view);
@@ -219,7 +221,7 @@ function bind(view, j, n) {
     const fx = lastOf(mx.log, (e) => e.kind === 'fix');
     fx.applied = true;
     const cup = structuredClone(mx.cup);
-    fx.add.forEach((a) => { const c = cup.find((p) => p.id === a.id); if (c) c.g = Math.round((c.g + a.g) * 100) / 100; else cup.push({ id: a.id, g: a.g }); });
+    fx.add.forEach((a) => { const c = cup.find((p) => p.id === a.id); if (c) c.g = Math.round((c.g + a.g) * 1000) / 1000; else cup.push({ id: a.id, g: a.g }); });
     mx.cup = cup;
     mx.log.push(me({ text: `넣었어요 (컵 ${fmtG(cupTotal(cup))})` }));
   });
@@ -332,7 +334,7 @@ async function callAI(j, step, extra, photoIds) {
 function cleanG(list, kinds = ['paint']) {
   const mats = H.matMap();
   return (list || []).filter((p) => mats[p.id] && kinds.includes(mats[p.id].kind) && H.owned(mats[p.id]) && p.g > 0)
-    .map((p) => ({ id: p.id, g: Math.round(p.g * 100) / 100 })).filter((p) => p.g >= 0.01);
+    .map((p) => ({ id: p.id, g: p.g >= 0.0095 ? Math.round(p.g * 100) / 100 : 0.005 }));
 }
 
 async function propose(j) {
@@ -480,13 +482,10 @@ function moreSheet(j) {
     <label class="field"><span>메모</span><textarea id="ms-note">${esc(cur.note || '')}</textarea></label>
     <div class="btns"><button class="btn grow" id="ms-save">저장</button></div>
     <hr class="sep" />
-    <button class="btn line block" id="ms-undo">마지막 단계 되돌리기</button>
-    <div style="height:8px"></div>
     <button class="btn danger block" id="ms-del">${ic('trash')}이 조색 기록 삭제</button>`, (sh) => {
     H.bindChips(sh, 'surface', async (v) => { const s = H.SURFACES.find((x) => x.k === v); await save('jobs', { ...H.findJob(j.id), surface: v, sub: s.sub[0] }); H.closeSheet(); });
     H.bindChips(sh, 'sub', (v) => save('jobs', { ...H.findJob(j.id), sub: v }));
     $('#ms-save', sh).onclick = async () => { await save('jobs', { ...H.findJob(j.id), title: $('#ms-title', sh).value.trim(), note: $('#ms-note', sh).value }); H.closeSheet(); H.toast('저장했습니다'); };
-    $('#ms-undo', sh).onclick = async () => { await undo(j); H.closeSheet(); };
     $('#ms-del', sh).onclick = async () => {
       if (!confirm('이 조색 기록과 사진이 지워집니다. 삭제할까요?')) return;
       const c = H.findJob(j.id);

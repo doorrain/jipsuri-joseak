@@ -5,11 +5,13 @@ import { hexToRgb, rgbToHex, lin, unlin, rgbToLab, labToHex, deltaE, direction, 
 import { solveBoard } from './solver.js';
 
 const BUFF = 'g-tb';
-const r2 = (g) => Math.round(g * 100) / 100;
+const r2 = (g) => (g >= 0.0095 ? Math.round(g * 100) / 100 : g > 0.002 ? 0.005 : 0);
 const scale = (hex, k) => rgbToHex(unlin(lin(hexToRgb(hex)).map((v, c) => v * k[c])));
 const ratio = (a, b) => { const A = lin(hexToRgb(a)), B = lin(hexToRgb(b)); return A.map((v, c) => Math.min(2.5, Math.max(0.4, (v + 0.002) / (B[c] + 0.002)))); };
 const Lof = (hex) => rgbToLab(hexToRgb(hex))[0];
-export const fmtG = (g) => `${(+g).toFixed(2)}g`;
+export const fmtG = (g) => (g > 0 && g < 0.01 ? '이쑤시개 끝' : `${(+g).toFixed(2)}g`);
+// 반올림 뒤 합계가 컵 양과 딱 맞게: 차이를 가장 많은 재료에
+const fitTotal = (cup, cupG) => { if (!cup.length) return cup; const big = cup.reduce((a, b) => (b.g > a.g ? b : a)); big.g = Math.round((big.g + cupG - cup.reduce((a, p) => a + p.g, 0)) * 100) / 100; return cup; };
 export const cupTotal = (cup) => (cup || []).reduce((a, p) => a + (p.g || 0), 0);
 
 // 컵의 색 (g을 무게로 섞음)
@@ -53,13 +55,14 @@ export function proposeCup(targetHex, ctx, cupG) {
     if (b) b.w += tot * 0.2; else parts.push({ id: BUFF, w: tot * 0.2 });
   }
   const sum = parts.reduce((a, p) => a + p.w, 0);
-  const cup = parts.map((p) => ({ id: p.id, g: r2((cupG * p.w) / sum) })).filter((p) => p.g >= 0.01);
+  const cup = parts.map((p) => ({ id: p.id, g: r2((cupG * p.w) / sum) })).filter((p) => p.g > 0);
+  fitTotal(cup, cupG);
   return { cup, tonerPlan: r.toner, de: r.de };
 }
 // 저장해 둔 레시피를 이번 컵 무게로
 export const scaleCup = (cup, cupG) => {
   const t = cupTotal(cup) || 1;
-  return cup.map((p) => ({ id: p.id, g: r2((p.g * cupG) / t) })).filter((p) => p.g >= 0.01);
+  return fitTotal(cup.map((p) => ({ id: p.id, g: r2((p.g * cupG) / t) })).filter((p) => p.g > 0), cupG);
 };
 
 /* ---------- ② 바탕 시험칠 → 컵에 더 넣기 ---------- */
@@ -105,7 +108,7 @@ export function baseFix({ cup, targetHex, floorHex, patchHex, feelings, tonerPla
     if (!best) break;
     g = best.g; c = best.c; added += best.st;
   }
-  out.add = paints.map((p, i) => ({ id: p.id, g: r2(g[i] - g0[i]) })).filter((x) => x.g >= 0.01);
+  out.add = paints.map((p, i) => ({ id: p.id, g: r2(g[i] - g0[i]) })).filter((x) => x.g > 0);
   const after = mixPreview(paints.map((p, i) => ({ hex: p.hex, drops: g[i], strong: p.strong })));
   out.deAfter = after ? deltaE(goal, after) : deNow;
   const head = dirs.length ? `토너·마감까지 하면 목표와 비교해 ${dirs.join(', ')} 해야 합니다.` : '조금 차이가 있습니다.';
