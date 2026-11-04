@@ -1,3 +1,4 @@
+import './rescue.js'; // 비상 복구(2026-11 서버 이전)
 import { store, subscribe, initStore, login, logout, save, remove, saveSettings, restoreAll, newId } from './store.js';
 import { esc, today, md, matches, download } from './util.js';
 import { CATALOG, KIND_LABEL, SURFACES, GLOSS, FEELINGS, STAGES, GRAIN, GRAIN_TIPS, TONER_TIPS, GLOSS_TIPS, RECOVERY } from './seed.js';
@@ -150,7 +151,7 @@ function renderLogin() {
     try {
       await login($('#lg-email').value.trim(), $('#lg-pw').value);
     } catch (e) {
-      alert('로그인 실패: 이메일과 비밀번호를 확인해 주세요.');
+      alert(/Invalid login/i.test(e?.message) ? '로그인 실패: 이메일 또는 비밀번호가 맞지 않아요. (2026-11-04에 새로 만든 계정)' : '로그인 실패: ' + (e?.message || e));
     }
   };
 }

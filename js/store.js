@@ -137,6 +137,7 @@ async function refresh() {
 
 async function onSignedIn(user) {
   store.user = user;
+  keepRescue();
   const cached = readJSON(CACHE_KEY, null);
   if (cached) {
     loadState(cached);
@@ -150,7 +151,8 @@ async function onSignedIn(user) {
 async function initCloud() {
   const { createClient } = await import(SUPABASE_JS);
   sb = createClient(supabaseConfig.url, supabaseConfig.anonKey, {
-    auth: { persistSession: true, autoRefreshToken: true },
+    // 같은 주소의 다른 앱(견적·현장장부·조색)과 로그인 정보가 섞여 서로 끊기지 않도록 이 앱만의 칸에 보관
+    auth: { persistSession: true, autoRefreshToken: true, storageKey: 'joseak-auth' },
   });
   store.pending = readJSON(OUTBOX_KEY, []).length;
   const { data } = await sb.auth.getSession();
@@ -165,7 +167,7 @@ async function initCloud() {
       store.user = null;
       if (channel) sb.removeChannel(channel);
       channel = null;
-      localStorage.removeItem(CACHE_KEY);
+      // 이 기기의 마지막 데이터는 지우지 않음 (서버에 문제가 생겼을 때 비상 백업이 됨)
       emit();
     }
   });
@@ -277,4 +279,47 @@ export async function restoreAll(data) {
 
 export function newId(prefix) {
   return prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
+/* ---------- 비상 복구 (2026-11 서버 이전) ----------
+   예전 서버가 사라져, 기기에 남은 마지막 데이터가 유일한 사본입니다.
+   새 서버에 로그인하면 이 사본이 빈 내용으로 덮이므로, 그 전에 따로 떠 두고
+   '새 서버로 올리기'(서버에 없는 것만 추가) 또는 '파일로 받기'를 할 수 있게 합니다. */
+const RESCUE_KEY = 'joseak-rescue-v1';
+const RESCUE_COLS = COLS;
+function keepRescue() {
+  if (localStorage.getItem(RESCUE_KEY)) return;
+  const c = readJSON(CACHE_KEY, null);
+  if (c && RESCUE_COLS.some((k) => (c[k] || []).length)) writeJSON(RESCUE_KEY, { at: new Date().toISOString(), data: c, outbox: readJSON(OUTBOX_KEY, []) });
+}
+// 아직 새 서버로 올리지 않은 비상 사본 (로그인 전이면 지금 캐시)
+export function rescueCopy() {
+  const r = readJSON(RESCUE_KEY, null);
+  if (r) return r.uploadedAt ? null : r;
+  const c = readJSON(CACHE_KEY, null);
+  return c && RESCUE_COLS.some((k) => (c[k] || []).length) ? { at: '', data: c, outbox: readJSON(OUTBOX_KEY, []) } : null;
+}
+export const rescueCounts = (r) => RESCUE_COLS.map((k) => [k, (r.data[k] || []).length]);
+export async function uploadRescue() {
+  const r = rescueCopy();
+  if (!r || !sb) return 0;
+  const now = new Date().toISOString();
+  const rows = [];
+  RESCUE_COLS.forEach((k) => (r.data[k] || []).forEach((o) => {
+    const { id, ...rest } = o;
+    rows.push({ col: k, id, data: clean(rest), updated_at: now });
+  }));
+  if (r.data.settings) rows.push({ col: 'settings', id: 'main', data: clean(r.data.settings), updated_at: now });
+  // 이미 서버에 있는 것(다른 휴대폰이 먼저 올린 것)은 건드리지 않고, 없는 것만 추가
+  for (let i = 0; i < rows.length; i += 500) {
+    const { error } = await sb.from(TABLE).upsert(rows.slice(i, i + 500), { onConflict: 'col,id', ignoreDuplicates: true });
+    if (error) throw error;
+  }
+  writeJSON(RESCUE_KEY, { ...r, uploadedAt: now });
+  await refresh();
+  return rows.length;
+}
+export function dismissRescue() {
+  const r = readJSON(RESCUE_KEY, null) || rescueCopy();
+  if (r) writeJSON(RESCUE_KEY, { ...r, uploadedAt: 'skipped' });
 }
